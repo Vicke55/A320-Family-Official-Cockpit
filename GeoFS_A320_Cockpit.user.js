@@ -2,7 +2,7 @@
 // @name         GeoFS A320 Cockpit (WIP) 9
 // @namespace    https://github.com/
 // @version      9
-// @description  Replaces the cockpit of the community A320-214 in GeoFS with the "A320 Cockpit 2" model.
+// @description  Replaces the cockpit of the community A320 Aircafts in GeoFS with the "A320 Cockpit 2" model.
 // @match        https://beta.geo-fs.com/geofs.php?a=22*
 // @grant        none
 // @run-at       document-start
@@ -537,17 +537,25 @@
   }
   function setGlbBlob(b) { return patchGLB(b).then(function (pb) { state.url = URL.createObjectURL(pb); }); }
 
-  // ---------- storage for the GLB (so it survives reloads) ----------
-  function idb() {
-    return new Promise(function (res, rej) {
-      var r = indexedDB.open('a320cp', 1);
-      r.onupgradeneeded = function () { r.result.createObjectStore('f'); };
-      r.onsuccess = function () { res(r.result); };
-      r.onerror = function () { rej(r.error); };
+  // ---------- load cockpit GLB from GitHub ----------
+  var GITHUB_GLB_URL = 'https://raw.githubusercontent.com/Vicke55/Assets-A320-cockpit/main/a320_cockpit_2_2k.glb';
+  function loadFromGithub() {
+    log('downloading cockpit model from GitHub...');
+    return fetch(GITHUB_GLB_URL, { cache: 'no-cache' }).then(function (response) {
+      if (!response.ok) throw new Error('GitHub returned HTTP ' + response.status);
+      return response.blob();
+    }).then(function (blob) {
+      if (!blob || !blob.size) throw new Error('The downloaded GLB file is empty.');
+      return setGlbBlob(blob);
+    }).then(function () {
+      log('cockpit model downloaded and prepared from GitHub');
+      setStatus();
+    }).catch(function (e) {
+      log('GitHub model download failed:', e);
+      if (statusEl) statusEl.textContent = 'Model download failed: ' + e.message;
+      throw e;
     });
   }
-  function idbGet(k) { return idb().then(function (db) { return new Promise(function (res, rej) { var q = db.transaction('f').objectStore('f').get(k); q.onsuccess = function () { res(q.result); }; q.onerror = function () { rej(q.error); }; }); }); }
-  function idbPut(k, v) { return idb().then(function (db) { return new Promise(function (res, rej) { var tx = db.transaction('f', 'readwrite'); tx.objectStore('f').put(v, k); tx.oncomplete = res; tx.onerror = function () { rej(tx.error); }; }); }); }
 
   // ---------- panel ----------
   var panel, statusEl, pending = false;
@@ -646,13 +654,15 @@
 
   function buildPanel() {
     statusEl = mk('div', { style: 'margin:4px 0 6px;opacity:.85' });
-    var fileIn = mk('input', { type: 'file', accept: '.glb', style: 'display:none' });
-    var pick = mk('button', { textContent: 'Choose cockpit.glb' });
-    pick.onclick = function () { fileIn.click(); };
-    fileIn.onchange = function () {
-      var f = fileIn.files[0]; if (!f) return;
-      idbPut('glb', f).catch(function (e) { log('could not store GLB', e); });
-      setGlbBlob(f).then(function () { setStatus(); flash(pick, 'Done. Re-select the aircraft'); });
+    var reloadModel = mk('button', { textContent: 'Reload model from GitHub' });
+    reloadModel.onclick = function () {
+      reloadModel.disabled = true;
+      reloadModel.textContent = 'Downloading...';
+      loadFromGithub().then(function () {
+        flash(reloadModel, 'Downloaded');
+      }).catch(function () {
+        reloadModel.textContent = 'Download failed';
+      }).then(function () { reloadModel.disabled = false; });
     };
     var useId = mk('button', { textContent: 'Enable for this aircraft' });
     useId.onclick = function () {
@@ -831,7 +841,7 @@
     ]);
 
     var advanced = mk('details', { style: 'margin-top:10px;border-top:1px solid #444;padding-top:6px' }, [mk('summary', { textContent: 'Advanced / calibration', style: 'cursor:pointer;font-weight:600' })]);
-    [mk('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;margin-top:6px' }, [pick, useId, fileIn]), statusEl, placement, moveSec, screensSec, leverSec, lightsSec, soundSec,
+    [mk('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;margin-top:6px' }, [reloadModel, useId]), statusEl, placement, moveSec, screensSec, leverSec, lightsSec, soundSec,
       mk('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;margin-top:8px' }, [copyTune, copyDiag])].forEach(function (k) { advanced.appendChild(k); });
 
     var body = mk('div', { style: 'max-height:70vh;overflow:auto' }, [
@@ -888,7 +898,8 @@
     if (window.geofs && geofs.aircraft && geofs.aircraft.instance && geofs.aircraft.instance.loadCockpit && document.body) {
       clearInterval(timer);
       install();
-      idbGet('glb').then(function (b) { if (b) return setGlbBlob(b); }).catch(function () {}).then(function () { buildPanel(); });
+      buildPanel();
+      loadFromGithub().catch(function () {});
       setInterval(function () { try { tickAudio(); } catch (e) {} }, 200);
       installPickLog();
       window.A320CP = { state: state, applyTune: applyTune, diagnostics: diagnostics, audio: audioFx };
