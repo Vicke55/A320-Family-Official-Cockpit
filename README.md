@@ -1,4 +1,3 @@
-# A320-Family-Official-Cockpit
 # GeoFS A320 Cockpit
 
 A custom 3D Airbus A320 cockpit for GeoFS.
